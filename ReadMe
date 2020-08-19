@@ -3,3 +3,10 @@ You can found byte code at : https://drive.google.com/open?id=19m2ZWXI9HeJk81WSK
 
 Analysis Result.txt.zip is the analysis results of the smart contracts on Ethereum. Each distinct bytecode is identified by a hash value. Related contract addresses can be found on our dataset.
 The DefectChecker tool will be released after the paper is published.
+
+
+The environment of DefectChecker:
+1. JDK 1.8
+2. EVM Version: 1.8.14
+3. Solidity version: 0.4.25
+To be notice, the command on the L35 of Main.java and L63 of Utils.java might need change according to users' local environment
