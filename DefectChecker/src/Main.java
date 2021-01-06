@@ -38,7 +38,15 @@ public class Main {
         }
 
         String[] tmp = binary.split("\n");
+        boolean hasUnchechedExternalCalls = false;
+        boolean hasStrictBalanceEquality = false;
+        boolean hasTransactionStateDependency = false;
+        boolean hasBlockInfoDependency = false;
+        boolean hasDoSUnderExternalInfluence = false;
+        boolean hasNestCall = false;
         boolean hasReentrancy = false;
+        boolean hasGreedyContract = false;
+        StringBuilder sb = new StringBuilder();
         for(int i = 0;i < tmp.length-1;i++){
             if(tmp[i].startsWith("Binary")){
                 String address = tmp[i-1].replaceAll("=", "").replaceAll(" ", "").replace("\n", "");
@@ -48,7 +56,29 @@ public class Main {
                 System.out.println(address);
                 DefectChecker defectChecker = parserFromBytecode(bytecode);
                 if(defectChecker != null){
+                    hasUnchechedExternalCalls |= defectChecker.hasUnchechedExternalCalls;
+                    hasStrictBalanceEquality |= defectChecker.hasStrictBalanceEquality;
+                    hasTransactionStateDependency |= defectChecker.hasTransactionStateDependency;
+                    hasBlockInfoDependency |= defectChecker.hasBlockInfoDependency;
+                    hasDoSUnderExternalInfluence |= defectChecker.hasDoSUnderExternalInfluence;
+                    hasNestCall |= defectChecker.hasNestCall;
                     hasReentrancy |= defectChecker.hasReentrancy;
+                    hasGreedyContract |= defectChecker.hasGreedyContract;
+                    sb.append("Uncheck External Calls: " + hasUnchechedExternalCalls + "\n");
+                    sb.append("Strict Balance Equality: " + hasStrictBalanceEquality + "\n");
+                    sb.append("Transaction State Dependency: " + hasTransactionStateDependency + "\n");
+                    sb.append("Block Info Dependency: " + hasBlockInfoDependency + "\n");
+                    sb.append("Greedy Contract: " + hasGreedyContract + "\n");
+                    sb.append("DoS Under External Influence: " + hasDoSUnderExternalInfluence + "\n");
+                    sb.append("Nest Call: " + hasNestCall + "\n");
+                    sb.append("Reentrancy: " + hasReentrancy + "\n");
+                    System.out.println("Uncheck External Calls: " + hasUnchechedExternalCalls);
+                    System.out.println("Strict Balance Equality: " + hasStrictBalanceEquality);
+                    System.out.println("Transaction State Dependency: " + hasTransactionStateDependency);
+                    System.out.println("Block Info Dependency: " + hasBlockInfoDependency);
+                    System.out.println("Greedy Contract: " + hasGreedyContract);
+                    System.out.println("DoS Under External Influence: " + hasDoSUnderExternalInfluence);
+                    System.out.println("Nest Call: " + hasNestCall);
                     System.out.println("Reentrancy: " + hasReentrancy);
                 }
 
@@ -76,22 +106,3 @@ public class Main {
         System.out.println("Running time：" + (endTime - startTime) + "ms");
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
