@@ -19,11 +19,169 @@ public class DefectChecker {
     }
 
     public void detectAllSmells(){
+
+        this.hasUnchechedExternalCalls = detectUnchechedExternalCalls();
+        this.hasStrictBalanceEquality = detectStrictBalanceEquality();
+        this.hasTransactionStateDependency = detectTransactionStateDependency();
+        this.hasBlockInfoDependency = detectBlockInfoDependency();
+        this.hasGreedyContract = detectGreedyContract();
+        this.hasDoSUnderExternalInfluence = detectDoSUnderExternalInfluence();
+        this.hasNestCall = detectNestCall();
         this.hasReentrancy = detectReentrancy();
     }
 
 
+    public boolean detectUnchechedExternalCalls(){
+        if(!binaryAnalyzer.allInstrs.contains("CALL"))
+            return false;
+        boolean res = false;
+        boolean start = false;
+        String callPC = "";
+        for(String event : binaryAnalyzer.stackEvents){
+            String eventLog = event.split(" ==> ")[2];
+            if(eventLog.startsWith("CALL_")){
+                start = true;
+                callPC = eventLog.split(" ")[0];
+                continue;
+            }
+            if(start){
+                //CALL instr does not checked by ISZERO
+                if(!eventLog.contains(callPC)){
+                    res = true;
+                    break;
+                }
+                if(eventLog.startsWith("ISZERO_")){
+                    String top = eventLog.split(" ")[0];
+                    //if CALL instr is checked by ISZERO, it means it's a legal CALL
+                    if(top.contains(callPC)){
+                        callPC = "";
+                        start = false;
+                    }
+                }
+            }
+        }
+        return res;
+    }
 
+    public boolean detectStrictBalanceEquality(){
+        if(!binaryAnalyzer.allInstrs.contains("BALANCE"))
+            return false;
+        boolean res = false;
+        boolean startBalance = false;
+        boolean startEQ = false;
+        String balancePC = "";
+        String eqPC = "";
+        for(String event : binaryAnalyzer.stackEvents){
+            String eventLog = event.split(" ==> ")[2].split(" ")[0];
+            if(eventLog.startsWith("BALANCE_")){
+                startBalance = true;
+                balancePC = eventLog.split(" ")[0];
+                continue;
+            }
+            if(startBalance){
+
+                if(!eventLog.contains(balancePC)){
+                    startBalance = false;
+                    startEQ = false;
+                    balancePC = "";
+                    eqPC = "";
+                    continue;
+                }
+
+                if(startEQ){
+                    if(!eventLog.contains(eqPC)){
+                        startBalance = false;
+                        startEQ = false;
+                        balancePC = "";
+                        eqPC = "";
+                        continue;
+                    }
+                    //Balance && EQ && ISZERO ==> has code smell.
+                    if(eventLog.startsWith("ISZERO_")){
+                        String top = eventLog.split(" ")[0];
+
+                        //may be there contrains other eq, so we should check it.
+                        if(top.contains(eqPC)){
+                            res = true;
+                            break;
+                        }
+                    }
+                }
+
+                if(eventLog.startsWith("EQ_")){
+                    startEQ = true;
+                    eqPC = eventLog.split(" ")[0];
+                }
+            }
+        }
+        return res;
+    }
+
+    public boolean detectTransactionStateDependency(){
+        if(!binaryAnalyzer.allInstrs.contains("ORIGIN"))
+            return false;
+        boolean res = false;
+        boolean start = false;
+        String originPC = "";
+        for(String event : binaryAnalyzer.stackEvents){
+            String eventLog = event.split(" ==> ")[2];
+            if(eventLog.startsWith("ORIGIN_")){
+                start = true;
+                originPC = eventLog.split(" ")[0];
+                continue;
+            }
+
+            if(start){
+                if(!eventLog.contains(originPC)){
+                    start = false;
+                    originPC = "";
+                    continue;
+                }
+                if(eventLog.startsWith("EQ_")){
+                    String top = eventLog.split(" ")[0];
+                    if(top.contains(originPC)){
+                        res = true;
+                        break;
+                        //EXAMPLE: EQ_1210(AND_1209(PUSH20_1188,ORIGIN_1187),AND_1186(PUSH20_1165,AND_1164(PUSH20_1143,DIV_1142(SLOAD_1135(0_1131),1_1140))))
+//                        Pair<String, String> splitedInstr = Utils.splitInstr2(top);
+//                        String address = "";
+//                        if(splitedInstr.getFirst().contains(originPC))
+//                            address = splitedInstr.getSecond();
+//                        else if(splitedInstr.getSecond().contains(originPC))
+//                            address = splitedInstr.getFirst();
+//                        if(address.startsWith("AND_")){
+//                            Pair<String, String> splitedAddr = Utils.splitInstr2(address);
+//                            if((splitedAddr.getFirst().contains("PUSH20_") && splitedAddr.getSecond().contains("SLOAD_")) ||
+//                                    (splitedAddr.getSecond().contains("PUSH20_") && splitedAddr.getFirst().contains("SLOAD_")))
+//                            {
+//                                res = true;
+//                                break;
+//                            }
+//                        }
+                    }
+
+                }
+            }
+        }
+        return res;
+    }
+
+    public boolean detectBlockInfoDependency(){
+        String[] blockInstr = new String[]{"BLOCKHASH", "COINBASE", "NUMBER", "DIFFICULTY", "GASLIMIT"};
+        boolean res = false;
+        for(Map.Entry<Integer, BasicBlock> entry : this.binaryAnalyzer.pos2BlockMap.entrySet()){
+            BasicBlock block = entry.getValue();
+            if(block.conditionalJumpExpression.length() > 1){
+                for(String instr : blockInstr){
+                    if(block.conditionalJumpExpression.contains(instr)){
+                        res = true;
+                        break;
+                    }
+                }
+            }
+        }
+        return res;
+    }
 
     public boolean isPayable(Integer startPos){
         if(startPos == -1)
@@ -43,6 +201,135 @@ public class DefectChecker {
             payable = false;
         return payable;
 
+    }
+
+    public boolean detectGreedyContract(){
+        //if a contract can receive money(contains payable function), but cannot send ETH(do not contains CALL/SELFDESTRUCT)
+
+        if(this.binaryAnalyzer.allInstrs.contains("SELFDESTRUCT"))
+            return false;
+        boolean payable = false;
+        boolean canSentMoney = false;
+        if(isPayable(this.binaryAnalyzer.fallbackPos))
+            payable = true;
+        for(Integer pos : this.binaryAnalyzer.publicFunctionStartList){
+            if(isPayable(pos))
+                payable = true;
+        }
+        for(Map.Entry<Integer, BasicBlock> entry : this.binaryAnalyzer.pos2BlockMap.entrySet()){
+            BasicBlock block = entry.getValue();
+//            if(block.moneyCall)
+            if(block.instrString.toString().contains("CALL "))
+                canSentMoney = true;
+        }
+        if(payable && !canSentMoney)
+            return true;
+        return false;
+    }
+
+    public boolean detectDoSUnderExternalInfluence(){
+        for(Map.Entry<Integer, BasicBlock> entry : this.binaryAnalyzer.pos2BlockMap.entrySet()){
+            BasicBlock block = entry.getValue();
+            if(block.isCircle){
+
+                if(block.jumpType == BasicBlock.CONDITIONAL && block.moneyCall){
+                    BasicBlock fall = this.binaryAnalyzer.pos2BlockMap.get(block.fallPos);
+                    if(fall.jumpType == BasicBlock.TERMINAL)
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public boolean detectNestCall(){
+        if(!this.binaryAnalyzer.allInstrs.contains("CALL"))
+            return false;
+        if(!this.binaryAnalyzer.allInstrs.contains("SLOAD"))
+            return false;
+        int slotID = -1;
+        boolean slotSizeLimit = false; //if do not limit slot size && have CALL ==> Nest Call
+        boolean hasCall = false;
+        for(Map.Entry<Integer, BasicBlock> entry : this.binaryAnalyzer.pos2BlockMap.entrySet()){
+            BasicBlock block = entry.getValue();
+            if(block.isCircleStart){
+                String condition = block.conditionalJumpExpression;
+                if(!condition.contains("SLOAD"))
+                    continue;
+                slotID = Utils.getSlotID(condition);
+                if(slotID == -1)
+                    continue;
+
+                //BFS-travel to circle body and detect whether a jumpCondition contains slotID.
+                Queue<BasicBlock> que = new LinkedList<>();
+                HashSet<Integer> visited = new HashSet<>();
+                visited.add(block.startBlockPos);
+                que.offer(this.binaryAnalyzer.pos2BlockMap.get(block.conditionalJumpPos));
+                que.offer(this.binaryAnalyzer.pos2BlockMap.get(block.fallPos));
+                while(!que.isEmpty()){
+                    BasicBlock topBlock = que.poll();
+                    if(topBlock.conditionalJumpExpression.length() > 0){
+                        if(topBlock.conditionalJumpExpression.contains("SLOAD_")
+                                && (topBlock.conditionalJumpExpression.contains("LT") ||
+                                topBlock.conditionalJumpExpression.contains("GT"))){
+                            int id = Utils.getSlotID(topBlock.conditionalJumpExpression);
+                            if(id == slotID) {
+                                String[] tmp = topBlock.instrString.toString().split(" ");
+                                int idx = 0;
+                                for(idx = 0;idx < tmp.length;idx++){
+                                    if(tmp[idx].equals("SLOAD"))
+                                        break;
+                                }
+                                if(idx > 2){
+                                    if(tmp[idx-1].startsWith("DUP") && tmp[idx-2].startsWith("PUSH")){
+                                        slotSizeLimit = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+//                    if(topBlock.instrString.toString().contains("CALL ")){
+                    if(topBlock.moneyCall){
+                        hasCall = true;
+                    }
+
+                    if(topBlock.jumpType == BasicBlock.CONDITIONAL){
+                        if(topBlock.conditionalJumpPos > 0){
+                            BasicBlock child1 = this.binaryAnalyzer.pos2BlockMap.get(topBlock.conditionalJumpPos);
+                            if(child1.isCircle && !visited.contains(child1.startBlockPos))
+                                que.offer(child1);
+                            visited.add(child1.startBlockPos);
+                        }
+                        BasicBlock child2 = this.binaryAnalyzer.pos2BlockMap.get(topBlock.fallPos);
+                        if(child2.isCircle && !visited.contains(child2.startBlockPos))
+                            que.offer(child2);
+                        visited.add(child2.startBlockPos);
+                    }
+                    else if(topBlock.jumpType == BasicBlock.UNCONDITIONAL){
+                        if(topBlock.unconditionalJumpPos > 0){
+                            BasicBlock child = this.binaryAnalyzer.pos2BlockMap.get(topBlock.unconditionalJumpPos);
+                            if(child.isCircle && !visited.contains(child.startBlockPos))
+                                que.offer(child);
+                            visited.add(child.startBlockPos);
+                        }
+                    }
+                    else if(topBlock.jumpType == BasicBlock.FALL){
+                        BasicBlock child = this.binaryAnalyzer.pos2BlockMap.get(topBlock.fallPos);
+                        if(child.isCircle && !visited.contains(child.startBlockPos))
+                            que.offer(child);
+                        visited.add(child.startBlockPos);
+                    }
+                }
+
+                if(slotSizeLimit)
+                    return false;
+            }
+        }
+
+        if(hasCall)
+            return true;
+        return false;
     }
 
 
@@ -202,7 +489,19 @@ public class DefectChecker {
 
 
     public String printAllDetectResult(){
-        String res = "Reentrancy: " + this.hasReentrancy + "\n";;
+        String res = "";
+        res += "Uncheck External Calls: " + this.hasUnchechedExternalCalls + "\n";
+        res += "Strict Balance Equality: " + this.hasStrictBalanceEquality + "\n";
+        res += "Transaction State Dependency: " + this.hasTransactionStateDependency + "\n";
+        res += "Block Info Dependency: " + this.hasBlockInfoDependency + "\n";
+        res += "Greedy Contract: " + this.hasGreedyContract + "\n";
+        res += "DoS Under External Influence: " + this.hasDoSUnderExternalInfluence + "\n";
+        res += "Nest Call: " + this.hasNestCall + "\n";
+        res += "Reentrancy: " + this.hasReentrancy + "\n";
+        res += "Code Coverage:" + this.binaryAnalyzer.codeCoverage + "\n";
+        res += "Miss recognized Jump: " + this.binaryAnalyzer.misRecognizedJump + "\n";
+        res += "Cyclomatic Complexity: " + this.binaryAnalyzer.cyclomatic_complexity + "\n";
+        res += "Number of Instructions: " + this.binaryAnalyzer.numInster + "\n";
         return res;
     }
 }
