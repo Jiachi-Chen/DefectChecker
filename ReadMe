@@ -1,3 +1,8 @@
+Note (DEC-2024):
+
+This work was initiated at the end of 2017. There have been significant changes in recent years. For example, many defects are now outdated and will appear in recent Solidity versions. Additionally, smart contracts have become much more complicated compared to those in 2017. Thus, this tool may not work on the current smart contracts.
+
+
 There are two kinds of datasets, i.e., bytecode on Ethereum and labeled ground truth(ContractDefect.csv).
 You can found byte code at : https://drive.google.com/open?id=19m2ZWXI9HeJk81WSKeoFd0q3cIXEjcLF ; There are two files in this zip; hashcode stores all distince bytecode, which is identified by a hash value. You can find the related contract addresses on hashaddr.
 
@@ -9,3 +14,5 @@ The environment of DefectChecker:
 2. EVM Version: 1.8.14
 3. Solidity version: 0.4.25
 To be notice, the command on the L35 of Main.java and L63 of Utils.java might need change according to users' local environment
+
+
